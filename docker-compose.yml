@@ -1,0 +1,9 @@
+version: '3.8'
+services:
+  k6:
+    image: loadimpact/k6:latest
+    working_dir: /app
+    volumes:
+      - ./:/app
+    entrypoint: ["k6"]
+    command: ["run", "src/tests/load/loadTest.js"]

@@ -1,0 +1,18 @@
+{
+  "name": "k6-practice",
+  "version": "1.0.0",
+  "description": "this is a k6 script",
+  "license": "ISC",
+  "author": "Nitin",
+  "type": "module",
+  "main": "script.js",
+  "scripts": {
+    "smoke": "K6_ENV=dev k6 run src/tests/smoke/smokeTest.js",
+    "load": "K6_ENV=qa k6 run src/tests/load/loadTest.js",
+    "load:allure": "mkdir -p allure-results && K6_ENV=qa k6 run src/tests/load/loadTest.js",
+    "stress": "K6_ENV=stage k6 run src/tests/stress/stressTest.js",
+    "soak": "K6_ENV=prod k6 run src/tests/soak/soakTest.js",
+    "spike": "K6_ENV=qa k6 run src/tests/spike/spikeTest.js",
+    "booking": "K6_ENV=dev k6 run src/tests/smoke/bookingSmokeTest.js"
+  }
+}
