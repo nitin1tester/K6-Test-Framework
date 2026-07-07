@@ -150,7 +150,7 @@ jobs:
 
       - name: Convert to Allure results
         if: always()
-        run: node scripts/k6-to-allure.js reports/stress-output.json allure-results/stress
+        run: node scripts/k6-to-allure.cjs reports/stress-output.json allure-results/stress
 
       - name: Upload stress artifacts
         if: always()

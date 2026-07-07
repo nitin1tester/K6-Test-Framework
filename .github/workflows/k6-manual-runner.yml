@@ -101,7 +101,7 @@ jobs:
 
       - name: Convert to Allure results
         if: always()
-        run: node scripts/k6-to-allure.js reports/manual-output.json allure-results
+        run: node scripts/k6-to-allure.cjs reports/manual-output.json allure-results
 
       - name: Tag this run's metadata
         if: always()

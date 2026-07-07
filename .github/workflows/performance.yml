@@ -51,7 +51,7 @@ jobs:
         run: K6_ENV=qa k6 run --out json=reports/k6-output.json src/tests/smoke/smokeTest.js
 
       - name: Convert k6 JSON output to Allure results
-        run: node scripts/k6-to-allure.js reports/k6-output.json allure-results
+        run: node scripts/k6-to-allure.cjs reports/k6-output.json allure-results
 
       - name: Add environment info to Allure report
         run: |
