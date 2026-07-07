@@ -1,0 +1,136 @@
+name: K6 Manual Test Runner
+
+# Purely on-demand — pick your environment and test type from the Actions tab,
+# no sequential gating, no push/PR/schedule triggers. Use this for ad hoc runs
+# while debugging a specific test, without waiting on the full pipeline.
+on:
+  workflow_dispatch:
+    inputs:
+      test_type:
+        description: "Which k6 test to run"
+        required: true
+        type: choice
+        options: [smoke, load, stress, soak, spike, booking]
+        default: smoke
+      environment:
+        description: "Target environment"
+        required: true
+        type: choice
+        options: [dev, qa, stage, prod]
+        default: dev
+      vus:
+        description: "Override virtual users (leave blank to use the test file's own config)"
+        required: false
+        type: string
+      duration:
+        description: "Override duration, e.g. 30s / 5m (leave blank to use the test file's own config)"
+        required: false
+        type: string
+      publish_report:
+        description: "Publish the Allure report to GitHub Pages after this run"
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  manual-run:
+    name: "Manual run: ${{ inputs.test_type }} @ ${{ inputs.environment }}"
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install k6
+        run: |
+          curl -s https://dl.k6.io/key.gpg | sudo gpg --dearmor -o /usr/share/keyrings/k6-archive-keyring.gpg
+          echo "deb [signed-by=/usr/share/keyrings/k6-archive-keyring.gpg] https://dl.k6.io/deb stable main" | sudo tee /etc/apt/sources.list.d/k6.list
+          sudo apt-get update && sudo apt-get install -y k6
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Install Allure command line
+        run: npm install -g allure-commandline
+
+      - name: Resolve test file path
+        id: resolve
+        run: |
+          case "${{ inputs.test_type }}" in
+            smoke)   echo "path=src/tests/smoke/smokeTest.js" >> "$GITHUB_OUTPUT" ;;
+            load)    echo "path=src/tests/load/loadTest.js" >> "$GITHUB_OUTPUT" ;;
+            stress)  echo "path=src/tests/stress/stressTest.js" >> "$GITHUB_OUTPUT" ;;
+            soak)    echo "path=src/tests/soak/soakTest.js" >> "$GITHUB_OUTPUT" ;;
+            spike)   echo "path=src/tests/spike/spikeTest.js" >> "$GITHUB_OUTPUT" ;;
+            booking) echo "path=src/tests/smoke/bookingSmokeTest.js" >> "$GITHUB_OUTPUT" ;;
+          esac
+
+      - name: Verify test file exists
+        run: |
+          if [ ! -f "${{ steps.resolve.outputs.path }}" ]; then
+            echo "::error::Test file not found at ${{ steps.resolve.outputs.path }}. Check src/tests/ paths in this workflow."
+            exit 1
+          fi
+
+      - name: Build k6 CLI overrides
+        id: overrides
+        run: |
+          FLAGS=""
+          if [ -n "${{ inputs.vus }}" ]; then
+            FLAGS="$FLAGS --vus ${{ inputs.vus }}"
+          fi
+          if [ -n "${{ inputs.duration }}" ]; then
+            FLAGS="$FLAGS --duration ${{ inputs.duration }}"
+          fi
+          echo "flags=$FLAGS" >> "$GITHUB_OUTPUT"
+
+      - name: Run k6 test
+        run: |
+          mkdir -p reports allure-results
+          K6_ENV=${{ inputs.environment }} k6 run \
+            --out json=reports/manual-output.json \
+            ${{ steps.overrides.outputs.flags }} \
+            "${{ steps.resolve.outputs.path }}"
+
+      - name: Convert to Allure results
+        if: always()
+        run: node scripts/k6-to-allure.js reports/manual-output.json allure-results
+
+      - name: Tag this run's metadata
+        if: always()
+        run: |
+          cat <<EOF > allure-results/environment.properties
+          Environment=${{ inputs.environment }}
+          Test_Type=${{ inputs.test_type }}
+          Triggered_By=${{ github.actor }}
+          Run_Mode=Manual
+          Run_ID=${{ github.run_id }}
+          EOF
+
+      - name: Upload results as artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: manual-run-${{ inputs.test_type }}-${{ inputs.environment }}-${{ github.run_number }}
+          path: allure-results
+          retention-days: 14
+
+      - name: Generate Allure report
+        if: always()
+        run: allure generate allure-results --clean -o allure-report
+
+      - name: Publish report to GitHub Pages
+        if: always() && inputs.publish_report == true
+        uses: JamesIves/github-pages-deploy-action@v4
+        with:
+          branch: gh-pages
+          folder: allure-report
+          target-folder: manual-runs/${{ inputs.test_type }}-${{ inputs.environment }}
+          clean: false
