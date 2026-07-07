@@ -202,7 +202,7 @@ jobs:
         run: node scripts/k6-to-allure.cjs reports/soak-output.json allure-results/soak
 
       - name: Upload soak artifacts
-        if: always()x
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: allure-results-soak
