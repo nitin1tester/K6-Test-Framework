@@ -32,7 +32,7 @@ jobs:
           node-version: "20"
 
       - name: Install project dependencies
-        run: npm ci
+        run: npm install
 
       - name: Install Allure command line (no Docker)
         run: npm install -g allure-commandline --save-dev
@@ -40,9 +40,15 @@ jobs:
       - name: Create reports/allure-results directories
         run: mkdir -p reports allure-results
 
+      - name: Verify test file exists (debug)
+        run: |
+          echo "Looking for the load test file under src/ ..."
+          find src -iname "*.js" | grep -i load || echo "No file matching *load* found under src/"
+          echo "--- Full src/ tree ---"
+          ls -R src
+
       - name: Run k6 test (JSON output)
         run: K6_ENV=qa k6 run --out json=reports/k6-output.json src/tests/load/loadTest.js
-        continue-on-error: true   # let a failed check still produce a report
 
       - name: Convert k6 JSON output to Allure results
         run: node scripts/k6-to-allure.js reports/k6-output.json allure-results
