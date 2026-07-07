@@ -1,17 +1,102 @@
-name: Performance Tests
+name: K6 Load Test with Allure Report
 
 on:
-  workflow_dispatch:
+  workflow_dispatch:        # manual trigger
+  schedule:
+    - cron: "0 3 * * *"     # adjust or remove as needed
   push:
-    branches:
-      - main
+    branches: [main]
 
 jobs:
-  k6:
+  performance-test:
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
       - name: Install k6
-        run: sudo apt-get update && sudo apt-get install -y gnupg2 && curl -s https://dl.k6.io/key.gpg | sudo apt-key add - && echo 'deb https://dl.k6.io/deb stable main' | sudo tee /etc/apt/sources.list.d/k6.list && sudo apt-get update && sudo apt-get install -y k6
-      - name: Run smoke test
-        run: K6_ENV=dev k6 run src/tests/smoke/smokeTest.js
+        run: |
+          sudo gpg -k
+          sudo gpg --no-default-keyring --keyring /usr/share/keyrings/k6-archive-keyring.gpg --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys C5AD17C747E3415A3642D57D77C6C491D6AC1D6
+          echo "deb [signed-by=/usr/share/keyrings/k6-archive-keyring.gpg] https://dl.k6.io/deb stable main" | sudo tee /etc/apt/sources.list.d/k6.list
+          sudo apt-get update
+          sudo apt-get install k6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Create reports/allure-results directories
+        run: mkdir -p reports allure-results
+
+      - name: Run k6 test (JSON output)
+        run: |
+          K6_ENV=qa k6 run --out json=reports/k6-output.json src/tests/load/loadTest.js
+        continue-on-error: true   # let a failed check still produce a report instead of killing the job
+
+      - name: Convert k6 JSON output to Allure results
+        run: node scripts/k6-to-allure.js reports/k6-output.json allure-results
+
+      - name: Add environment info to Allure report
+        run: |
+          cat <<EOF > allure-results/environment.properties
+          Environment=QA
+          Test_Type=Load
+          Triggered_By=${{ github.actor }}
+          Branch=${{ github.ref_name }}
+          Run_ID=${{ github.run_id }}
+          EOF
+
+      - name: Load previous Allure history (for trend graphs)
+        uses: actions/checkout@v4
+        with:
+          ref: gh-pages
+          path: gh-pages
+        continue-on-error: true
+
+      - name: Copy history into current results
+        run: |
+          if [ -d "gh-pages/${{ github.run_number }}" ]; then
+            :
+          fi
+          if [ -d "gh-pages/history" ]; then
+            cp -r gh-pages/history allure-results/history
+          fi
+        continue-on-error: true
+
+      - name: Generate Allure HTML report
+        uses: simple-elf/allure-report-action@v1.7
+        if: always()
+        with:
+          allure_results: allure-results
+          allure_report: allure-report
+          allure_history: allure-history
+          keep_reports: 20
+
+      - name: Publish report to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v3
+        if: always()
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_branch: gh-pages
+          publish_dir: allure-history
+
+      - name: Upload raw Allure results as artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: allure-results
+          path: allure-results
+          retention-days: 14
+
+      - name: Fail the job if k6 checks failed
+        run: |
+          if grep -q '"status": "failed"' allure-results/*-result.json 2>/dev/null; then
+            echo "One or more k6 checks failed."
+            exit 1
+          fi
