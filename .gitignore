@@ -6,3 +6,5 @@ allure-results/
 *.log
 *.tmp
 coverage/
+allure-report/
+report.html
