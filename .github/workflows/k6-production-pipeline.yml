@@ -1,0 +1,338 @@
+name: K6 Performance Test Pipeline
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      target_env:
+        description: "Run only a specific stage (leave blank to run the full sequential pipeline)"
+        required: false
+        type: choice
+        options: ["", smoke, load, stress, soak]
+  schedule:
+    - cron: "0 3 * * *"   # nightly full pipeline
+
+concurrency:
+  group: k6-pipeline-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: "20"
+
+jobs:
+  # ────────────────────────────────────────────────────────────
+  # Stage 1: Smoke — cheapest check, runs against dev, gates everything else
+  # ────────────────────────────────────────────────────────────
+  smoke:
+    name: Smoke Test (dev)
+    if: ${{ github.event.inputs.target_env == '' || github.event.inputs.target_env == 'smoke' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      status: ${{ steps.run.outcome }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install k6
+        run: |
+          curl -s https://dl.k6.io/key.gpg | sudo gpg --dearmor -o /usr/share/keyrings/k6-archive-keyring.gpg
+          echo "deb [signed-by=/usr/share/keyrings/k6-archive-keyring.gpg] https://dl.k6.io/deb stable main" | sudo tee /etc/apt/sources.list.d/k6.list
+          sudo apt-get update && sudo apt-get install -y k6
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Run smoke test
+        id: run
+        run: |
+          mkdir -p reports allure-results/smoke
+          K6_ENV=dev k6 run --out json=reports/smoke-output.json src/tests/smoke/smokeTest.js
+
+      - name: Convert to Allure results
+        if: always()
+        run: node scripts/k6-to-allure.js reports/smoke-output.json allure-results/smoke
+
+      - name: Upload smoke artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: allure-results-smoke
+          path: allure-results/smoke
+          retention-days: 14
+
+  # ────────────────────────────────────────────────────────────
+  # Stage 2: Load — normal traffic simulation against qa, only if smoke passed
+  # ────────────────────────────────────────────────────────────
+  load:
+    name: Load Test (qa)
+    needs: smoke
+    if: ${{ always() && needs.smoke.result == 'success' && (github.event.inputs.target_env == '' || github.event.inputs.target_env == 'load') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      status: ${{ steps.run.outcome }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install k6
+        run: |
+          curl -s https://dl.k6.io/key.gpg | sudo gpg --dearmor -o /usr/share/keyrings/k6-archive-keyring.gpg
+          echo "deb [signed-by=/usr/share/keyrings/k6-archive-keyring.gpg] https://dl.k6.io/deb stable main" | sudo tee /etc/apt/sources.list.d/k6.list
+          sudo apt-get update && sudo apt-get install -y k6
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Run load test
+        id: run
+        run: |
+          mkdir -p reports allure-results/load
+          K6_ENV=qa k6 run --out json=reports/load-output.json src/tests/load/loadTest.js
+
+      - name: Convert to Allure results
+        if: always()
+        run: node scripts/k6-to-allure.js reports/load-output.json allure-results/load
+
+      - name: Upload load artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: allure-results-load
+          path: allure-results/load
+          retention-days: 14
+
+  # ────────────────────────────────────────────────────────────
+  # Stage 3: Stress — push past normal capacity against stage, only if load passed
+  # ────────────────────────────────────────────────────────────
+  stress:
+    name: Stress Test (stage)
+    needs: load
+    if: ${{ always() && needs.load.result == 'success' && (github.event.inputs.target_env == '' || github.event.inputs.target_env == 'stress') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    outputs:
+      status: ${{ steps.run.outcome }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install k6
+        run: |
+          curl -s https://dl.k6.io/key.gpg | sudo gpg --dearmor -o /usr/share/keyrings/k6-archive-keyring.gpg
+          echo "deb [signed-by=/usr/share/keyrings/k6-archive-keyring.gpg] https://dl.k6.io/deb stable main" | sudo tee /etc/apt/sources.list.d/k6.list
+          sudo apt-get update && sudo apt-get install -y k6
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Run stress test
+        id: run
+        run: |
+          mkdir -p reports allure-results/stress
+          K6_ENV=stage k6 run --out json=reports/stress-output.json src/tests/stress/stressTest.js
+
+      - name: Convert to Allure results
+        if: always()
+        run: node scripts/k6-to-allure.js reports/stress-output.json allure-results/stress
+
+      - name: Upload stress artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: allure-results-stress
+          path: allure-results/stress
+          retention-days: 14
+
+  # ────────────────────────────────────────────────────────────
+  # Stage 4: Soak — long-running sustained load against prod-like env
+  # Only on the nightly schedule or explicit manual selection — never on every PR
+  # ────────────────────────────────────────────────────────────
+  soak:
+    name: Soak Test (prod)
+    needs: stress
+    if: >
+      always() && needs.stress.result == 'success' &&
+      (github.event_name == 'schedule' || github.event.inputs.target_env == 'soak')
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    outputs:
+      status: ${{ steps.run.outcome }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install k6
+        run: |
+          curl -s https://dl.k6.io/key.gpg | sudo gpg --dearmor -o /usr/share/keyrings/k6-archive-keyring.gpg
+          echo "deb [signed-by=/usr/share/keyrings/k6-archive-keyring.gpg] https://dl.k6.io/deb stable main" | sudo tee /etc/apt/sources.list.d/k6.list
+          sudo apt-get update && sudo apt-get install -y k6
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Run soak test
+        id: run
+        run: |
+          mkdir -p reports allure-results/soak
+          K6_ENV=prod k6 run --out json=reports/soak-output.json src/tests/soak/soakTest.js
+
+      - name: Convert to Allure results
+        if: always()
+        run: node scripts/k6-to-allure.js reports/soak-output.json allure-results/soak
+
+      - name: Upload soak artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: allure-results-soak
+          path: allure-results/soak
+          retention-days: 14
+
+  # ────────────────────────────────────────────────────────────
+  # Final stage: merge every stage's results into one Allure report,
+  # publish to GitHub Pages, notify Slack/email — runs regardless of
+  # which stages above succeeded or failed, so you always get a report.
+  # ────────────────────────────────────────────────────────────
+  report:
+    name: Publish Report & Notify
+    needs: [smoke, load, stress, soak]
+    if: always()
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install Allure command line
+        run: npm install -g allure-commandline
+
+      - name: Download all stage results
+        uses: actions/download-artifact@v4
+        with:
+          path: allure-results-merged
+          pattern: allure-results-*
+          merge-multiple: false
+
+      - name: Flatten merged results into one directory
+        run: |
+          mkdir -p allure-results
+          find allure-results-merged -name "*.json" -exec cp {} allure-results/ \;
+          echo "Merged $(ls allure-results | wc -l) result files."
+
+      - name: Fetch previous Allure history
+        run: |
+          git fetch origin gh-pages 2>/dev/null && \
+          git worktree add /tmp/gh-pages origin/gh-pages 2>/dev/null || \
+          echo "No gh-pages branch yet — starting fresh history."
+
+      - name: Copy history for trend graphs
+        run: |
+          if [ -d "/tmp/gh-pages/allure-report/history" ]; then
+            mkdir -p allure-results/history
+            cp -r /tmp/gh-pages/allure-report/history/* allure-results/history/
+          fi
+
+      - name: Generate combined Allure report
+        run: allure generate allure-results --clean -o allure-report
+
+      - name: Build dashboard index page
+        run: |
+          mkdir -p site
+          cp -r allure-report site/allure-report
+          cat <<EOF > site/index.html
+          <!DOCTYPE html>
+          <html>
+          <head><title>K6 Performance Dashboard</title></head>
+          <body style="font-family: sans-serif; max-width: 700px; margin: 40px auto;">
+            <h1>K6-Test-Framework — Performance Dashboard</h1>
+            <p>Run #${{ github.run_number }} — triggered by ${{ github.actor }} on ${{ github.ref_name }}</p>
+            <ul>
+              <li><a href="allure-report/index.html">Allure Report (Smoke + Load + Stress + Soak)</a></li>
+            </ul>
+            <h2>Stage results</h2>
+            <ul>
+              <li>Smoke: ${{ needs.smoke.result }}</li>
+              <li>Load: ${{ needs.load.result }}</li>
+              <li>Stress: ${{ needs.stress.result }}</li>
+              <li>Soak: ${{ needs.soak.result }}</li>
+            </ul>
+          </body>
+          </html>
+          EOF
+
+      - name: Publish to GitHub Pages
+        uses: JamesIves/github-pages-deploy-action@v4
+        with:
+          branch: gh-pages
+          folder: site
+          clean: true
+
+      - name: Determine overall pipeline status
+        id: overall
+        run: |
+          if [[ "${{ needs.smoke.result }}" == "failure" || "${{ needs.load.result }}" == "failure" || "${{ needs.stress.result }}" == "failure" || "${{ needs.soak.result }}" == "failure" ]]; then
+            echo "status=failure" >> "$GITHUB_OUTPUT"
+          else
+            echo "status=success" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Notify Slack
+        if: always()
+        uses: slackapi/slack-github-action@v1.27.0
+        with:
+          payload: |
+            {
+              "text": "K6 Performance Pipeline (${{ steps.overall.outputs.status }}) — Run #${{ github.run_number }} on ${{ github.ref_name }}\nSmoke: ${{ needs.smoke.result }} | Load: ${{ needs.load.result }} | Stress: ${{ needs.stress.result }} | Soak: ${{ needs.soak.result }}\nReport: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/allure-report/index.html"
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
+
+      - name: Notify via email
+        if: always()
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          username: ${{ secrets.EMAIL_USERNAME }}
+          password: ${{ secrets.EMAIL_PASSWORD }}
+          subject: "K6 Pipeline Run #${{ github.run_number }} — ${{ steps.overall.outputs.status }}"
+          to: ${{ secrets.NOTIFY_EMAIL_TO }}
+          from: K6 CI
+          body: |
+            Pipeline run #${{ github.run_number }} on ${{ github.ref_name }} finished.
+            Smoke: ${{ needs.smoke.result }}
+            Load: ${{ needs.load.result }}
+            Stress: ${{ needs.stress.result }}
+            Soak: ${{ needs.soak.result }}
+            Report: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/allure-report/index.html
+
+      - name: Fail pipeline if any stage failed
+        if: steps.overall.outputs.status == 'failure'
+        run: exit 1
