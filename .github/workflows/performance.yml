@@ -48,7 +48,7 @@ jobs:
           ls -R src
 
       - name: Run k6 test (JSON output)
-        run: K6_ENV=qa k6 run --out json=reports/k6-output.json src/tests/load/loadTest.js
+        run: K6_ENV=qa k6 run --out json=reports/k6-output.json src/tests/smoke/smokeTest.js
 
       - name: Convert k6 JSON output to Allure results
         run: node scripts/k6-to-allure.js reports/k6-output.json allure-results
