@@ -58,7 +58,7 @@ jobs:
 
       - name: Convert to Allure results
         if: always()
-        run: node scripts/k6-to-allure.js reports/smoke-output.json allure-results/smoke
+        run: node scripts/k6-to-allure.cjs reports/smoke-output.json allure-results/smoke
 
       - name: Upload smoke artifacts
         if: always()
@@ -104,7 +104,7 @@ jobs:
 
       - name: Convert to Allure results
         if: always()
-        run: node scripts/k6-to-allure.js reports/load-output.json allure-results/load
+        run: node scripts/k6-to-allure.cjs reports/load-output.json allure-results/load
 
       - name: Upload load artifacts
         if: always()
@@ -199,10 +199,10 @@ jobs:
 
       - name: Convert to Allure results
         if: always()
-        run: node scripts/k6-to-allure.js reports/soak-output.json allure-results/soak
+        run: node scripts/k6-to-allure.cjs reports/soak-output.json allure-results/soak
 
       - name: Upload soak artifacts
-        if: always()
+        if: always()x
         uses: actions/upload-artifact@v4
         with:
           name: allure-results-soak
