@@ -1,18 +1,45 @@
 <!DOCTYPE html>
-<html>
-<head><title>K6 Performance Dashboard</title></head>
-<body style="font-family: sans-serif; max-width: 700px; margin: 40px auto;">
-  <h1>K6-Test-Framework — Performance Dashboard</h1>
-  <p>Run #11 — triggered by nitin1tester on main</p>
-  <ul>
-    <li><a href="allure-report/index.html">Allure Report (Smoke + Load + Stress + Soak)</a></li>
-  </ul>
-  <h2>Stage results</h2>
-  <ul>
-    <li>Smoke: success</li>
-    <li>Load: success</li>
-    <li>Stress: success</li>
-    <li>Soak: failure</li>
-  </ul>
+<html dir="ltr" lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="allure-report-uuid" content="8e52ea20-fe54-4db8-9c6c-166ff9027e11">
+    <title>Allure Report</title>
+    <link rel="icon" href="assets/favicon-BDLHVmV7.ico">
+    <!-- allure-core-head:start -->
+    <!-- allure-core-head:end -->
+</head>
+<body>
+    <div id="alert"></div>
+    <div id="content">
+        <span class="spinner">
+            <span class="spinner__circle"></span>
+        </span>
+    </div>
+    <div id="popup"></div>
+    <!-- allure-core-body:start -->
+    <script>
+        window.__allureCoreLoaded = new Promise(function (resolve, reject) {
+        window.__allureResolveCoreLoaded = resolve;
+        window.__allureRejectCoreLoaded = reject;
+    });
+    </script>
+    <script src="assets/index-BraRl9ss.js"></script>
+    <script>
+        if (typeof window.__allureResolveCoreLoaded === "function") {
+            window.__allureResolveCoreLoaded([]);
+        }
+    </script>
+    <!-- allure-core-body:end -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-FVWC4GKEYS"></script>
+    <script>
+        window.dataLayer = window.dataLayer || [];
+        function gtag(){dataLayer.push(arguments);}
+        gtag('js', new Date());
+        gtag('config', 'G-FVWC4GKEYS', {
+          'allureVersion': '2.43.0',
+          'reportUuid': '8e52ea20-fe54-4db8-9c6c-166ff9027e11',
+          'single_file': false
+        });
+    </script>
 </body>
 </html>
